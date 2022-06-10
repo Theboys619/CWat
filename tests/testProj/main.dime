@@ -1,0 +1,17 @@
+func i32 test(x: i32) {
+  return x + 5;
+}
+
+export func str nice() {
+  return "Nice!";
+}
+
+export func str helloWorld() {
+  return "Hello, World!";
+}
+
+export func str main() {
+  let i32 x = 69420;
+
+  return test(x);
+}
