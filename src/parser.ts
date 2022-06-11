@@ -472,6 +472,32 @@ export default class Parser {
     return forStmt;
   }
 
+  pExtern(): AST {
+    const externTok = this.curTok;
+    this.advance(); // skip over 'extern'
+
+    let externStmt = new AST(ASTTypes.Extern, externTok);
+
+    if (this.curTok.equals(TokenTypes.Keyword, "func")) {
+      this.advance(); // skip over 'func'
+
+      const dataType = this.pDataType();
+
+      const identifierTok = this.curTok;
+      this.advance(); // skip over 'identifier'
+
+      const funcStmt = new AST(ASTTypes.FunctionDef, identifierTok);
+      funcStmt.args = this.pDelimiters("(", ")", ",", true);
+      funcStmt.dataType = dataType;
+
+      externStmt.assign = funcStmt;
+    } else if (this.curTok.equals(TokenTypes.Keyword, "let")) {
+
+    }
+
+    return externStmt;
+  }
+
   pInclude(): AST {
     const includeTok = this.curTok;
     this.advance(); // skip over 'include'
@@ -564,6 +590,9 @@ export default class Parser {
 
     if (this.curTok.equals(TokenTypes.Keyword, "For"))
       return this.pFor();
+
+    if (this.curTok.equals(TokenTypes.Keyword, "extern"))
+      return this.pExtern();
 
     if (this.curTok.equals(TokenTypes.Keyword, "include"))
       return this.pInclude();

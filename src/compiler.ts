@@ -151,7 +151,7 @@ export default class Compiler {
   stringList: StringList;
   funcList: FunctionList;
 
-  codeTop: string;
+  codeTop: string[];
 
   currentFunction: FunctionDef | null;
   currentIfBlock?: Record<string, any>;
@@ -166,14 +166,13 @@ export default class Compiler {
     this.funcList = new FunctionList();
     this.customTypes = {};
 
-    this.codeTop = "(module";
+    this.codeTop = ["(module"];
 
     this.currentFunction = null;
   };
 
   getFullCode(): string {
-    let fullCode = this.codeTop;
-    fullCode += "\n";
+    let fullCode = this.codeTop.join("\n") + "\n";
     fullCode += "\t(memory (export \"memory\") 1)\n";
     
     let strMemSize = 0;
@@ -307,14 +306,22 @@ export default class Compiler {
       );
     }
 
+    if (funcReturnType == "void")
+      return;
+
     if (funcReturnType == "char" || funcReturnType == "str" || funcReturnType == "bool")
       funcReturnType = "i32";
 
     if (!this.currentFunction)
       return;
 
+    let index = this.currentFunction.variables.varCount - this.currentFunction.ast.args.length;
+    if (index <= 0) {
+      index = 1;
+    }
+
     this.code[this.currentFunction?.headerLoc as number] += ` (result ${funcReturnType})`;
-    this.code[(this.currentFunction?.headerLoc as number) + this.currentFunction.variables.varCount - this.currentFunction.ast.args.length] += ` (result ${funcReturnType})`;
+    this.code[(this.currentFunction?.headerLoc as number) + index] += ` (result ${funcReturnType})`;
     (this.currentFunction as FunctionDef).returnValue = funcReturnType;
 
     if (this.currentIfBlock) {
@@ -594,6 +601,38 @@ export default class Compiler {
 
   }
 
+  compileExtern(node: AST) {
+    const { assign } = node;
+
+    const { args, dataType, value: token } = assign;
+
+    this.funcList.addFunction(assign, true);
+
+    let funcParamList = ``;
+    let funcReturnType = ``;
+
+    for (const arg of args) {
+      let argType = this.getRType(arg).value.value;
+
+      if (argType == "char" || argType == "str" || argType == "bool")
+        argType = "i32";
+
+      funcParamList += ` (param ${argType})`;
+    }
+
+    if (dataType || this.getRType(assign).value.value != "void") {
+      let argType = this.getRType(assign).value.value;
+
+      if (argType == "char" || argType == "str" || argType == "bool")
+        argType = "i32";
+
+      if (argType != "void")
+        funcReturnType = ` (result ${argType})`;
+    }
+
+    this.codeTop.push(`\t(import "std" "${token.value}" (func \$${token.value}${funcParamList}${funcReturnType}))`);
+  }
+
   compile(node: AST): keyof typeof ASTTypes {
     switch (node.kind) {
       case ASTTypes.Scope: {
@@ -655,6 +694,10 @@ export default class Compiler {
       case ASTTypes.WhileLoop:
         this.compileWhileLoop(node);
         return "WhileLoop";
+
+      case ASTTypes.Extern:
+        this.compileExtern(node);
+        return "Extern";
 
       default:
         return "Null";

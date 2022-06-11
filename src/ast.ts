@@ -27,7 +27,8 @@ const astTypeDef = [
   "StackAlloc",
   "DataType",
   "ArrayType",
-  "GenericType"
+  "GenericType",
+  "Extern"
 ] as const;
 export const ASTTypes: Record<typeof astTypeDef[number], typeof astTypeDef[number]> = {
   "Null": "Null",
@@ -56,7 +57,8 @@ export const ASTTypes: Record<typeof astTypeDef[number], typeof astTypeDef[numbe
   "StackAlloc": "StackAlloc",
   "DataType": "DataType",
   "ArrayType": "ArrayType",
-  "GenericType": "GenericType"
+  "GenericType": "GenericType",
+  "Extern": "Extern"
 };
 
 export default class AST {

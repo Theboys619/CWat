@@ -157,7 +157,7 @@ export default class Lexer {
   }
 
   isAlpha(c: string): boolean {
-    return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z');
+    return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z') || c == '_';
   }
 
   isDigit(c: string): boolean {
@@ -322,7 +322,7 @@ export default class Lexer {
           
           if (this.curChar == "\\") {
             if (this.peek() == "n") {
-              val += "\n";
+              val += "\\n";
               this.advance(2);
               
               continue;

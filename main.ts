@@ -1,6 +1,6 @@
 const IMPORTS = {
   std: {
-    printStr: wat_printStr
+    print_str: wat_printStr
   }
 };
 
@@ -9,8 +9,6 @@ const module = new WebAssembly.Module(wasmBin);
 const instance = new WebAssembly.Instance(module, IMPORTS);
 const memory = instance.exports.memory as WebAssembly.Memory;
 const main = instance.exports.main as CallableFunction;
-const helloWorld = instance.exports.helloWorld as CallableFunction;
-const nice = instance.exports.nice as CallableFunction;
 
 function wat_printStr(index: number) {
   const mem = new Uint8Array(memory.buffer);
@@ -22,5 +20,7 @@ function wat_printStr(index: number) {
   }
 }
 
-console.log(main(5));
+let returnValue = main(5);
+console.log();
+console.log("Return value:", returnValue);
 // wat_printStr(main());
