@@ -1,17 +1,8 @@
-func i32 test(x: i32) {
-  return x + 5;
-}
+export func i32 main(x: i32) {
+  let i32 y = 0;
+  while (y < 5) {
+    y++;
+  }
 
-export func str nice() {
-  return "Nice!";
-}
-
-export func str helloWorld() {
-  return "Hello, World!";
-}
-
-export func str main() {
-  let i32 x = 69420;
-
-  return test(x);
+  return y;
 }

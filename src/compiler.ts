@@ -102,6 +102,11 @@ class FunctionDef {
   name: string;
   ast: AST;
   isDef: boolean;
+  hasReturned: boolean;
+  headerLoc: number;
+
+  returnValue?: string;
+  blocks: number;
 
   variables: VariableList;
 
@@ -109,6 +114,10 @@ class FunctionDef {
     this.name = name;
     this.ast = ast;
     this.isDef = isDef;
+    this.headerLoc = 0;
+    this.hasReturned = false;
+
+    this.blocks = 0;
 
     this.variables = new VariableList();
   }
@@ -145,6 +154,9 @@ export default class Compiler {
   codeTop: string;
 
   currentFunction: FunctionDef | null;
+  currentIfBlock?: Record<string, any>;
+
+  customTypes: Record<string, AST>;
 
   constructor(ast?: AST) {
     this.ast = ast;
@@ -152,6 +164,7 @@ export default class Compiler {
 
     this.stringList = new StringList();
     this.funcList = new FunctionList();
+    this.customTypes = {};
 
     this.codeTop = "(module";
 
@@ -225,10 +238,14 @@ export default class Compiler {
     }
 
     const funcHeaderLoc = this.code.length;
+    this.currentFunction.headerLoc = funcHeaderLoc;
     this.code.push(funcHeader);
 
     let funcHasReturn = false;
     let funcReturn;
+
+    let returnBlockLoc = this.code.length;
+    this.code.push(`\t\t(block $funcleave`)
 
     for (let exp of block) {
       this.compile(exp);
@@ -239,32 +256,72 @@ export default class Compiler {
         funcReturn = exp;
     }
 
-    if (funcHasReturn) {
-      const funcReturnTNode = funcReturn?.dataType;
-      let funcReturnType = funcReturnTNode?.value?.value;
+  //   if (funcHasReturn) {
+  //     const funcReturnTNode = funcReturn?.dataType;
+  //     let funcReturnType = funcReturnTNode?.value?.value;
 
-      if (!funcReturnType)
-        funcReturnType = typeNode.value.value;
+  //     if (!funcReturnType)
+  //       funcReturnType = typeNode.value.value;
 
-      if (funcReturnType != typeNode.value.value && funcReturn) {
-        new DimeError(
-          `Invalid value returned. Value has type '${funcReturnType}' while function has '${typeNode.value.value}.'`,
-          funcReturn.assign.value.pos || null, [funcReturn.value]
-        );
-      }
+  //     if (funcReturnType != typeNode.value.value && funcReturn) {
+  //       new DimeError(
+  //         `Invalid value returned. Value has type '${funcReturnType}' while function has '${typeNode.value.value}.'`,
+  //         funcReturn.assign.value.pos || null, [funcReturn.value]
+  //       );
+  //     }
 
-      if (funcReturnType == "char" || funcReturnType == "str" || funcReturnType == "bool")
-        funcReturnType = "i32";
+  //     if (funcReturnType == "char" || funcReturnType == "str" || funcReturnType == "bool")
+  //       funcReturnType = "i32";
 
-      funcHeader += ` (result ${funcReturnType})`;
-    }
+  //     funcHeader += ` (result ${funcReturnType})`;
+  //     this.code[returnBlockLoc] += ` (result ${funcReturnType})`;
+  // }
 
-    this.code[funcHeaderLoc] = funcHeader;
-    this.code.push("\t)");
+  //   this.code[funcHeaderLoc] = funcHeader;
+    this.code.push("\t\t)\n\t)");
   }
 
   compileReturn(node: AST) {
     this.compile(node.assign);
+    this.code.push(`\t\tbr $funcleave`);
+
+    if (this.currentFunction?.hasReturned) {
+      if (this.currentIfBlock) {
+        if (this.currentIfBlock.elseReturn === false) {
+          this.code[this.currentIfBlock.headerLoc] += ` (result ${this.currentFunction.returnValue})`;
+        }
+      }
+      return;
+    }
+
+    (this.currentFunction as FunctionDef).hasReturned = true;
+
+    const typeNode = this.currentFunction?.ast.dataType as AST;
+    const funcReturnTNode = node.dataType;
+    let funcReturnType = typeNode.value.value;
+
+    if (funcReturnType != typeNode.value.value) {
+      new DimeError(
+        `Invalid value returned. Value has type '${funcReturnType}' while function has '${typeNode.value.value}.'`,
+        node.assign.value.pos || null, [node.value]
+      );
+    }
+
+    if (funcReturnType == "char" || funcReturnType == "str" || funcReturnType == "bool")
+      funcReturnType = "i32";
+
+    if (!this.currentFunction)
+      return;
+
+    this.code[this.currentFunction?.headerLoc as number] += ` (result ${funcReturnType})`;
+    this.code[(this.currentFunction?.headerLoc as number) + this.currentFunction.variables.varCount - this.currentFunction.ast.args.length] += ` (result ${funcReturnType})`;
+    (this.currentFunction as FunctionDef).returnValue = funcReturnType;
+
+    if (this.currentIfBlock) {
+      if (this.currentIfBlock.elseReturn === false) {
+        this.code[this.currentIfBlock.headerLoc] += ` (result ${funcReturnType})`;
+      }
+    }
   }
 
   compileInt(node: AST) {
@@ -318,26 +375,58 @@ export default class Compiler {
     const { left, right } = node;
     const func = this.currentFunction as FunctionDef;
 
+    // console.log(node, left);
+
     const varName = left.value.value;
-    const varType = left.dataType.value.value;
+    const varType = this.getRType(left).value.value;
     let wasmType = conversions[varType];
 
-    if (func.variables.hasVariable(varName)) {
-      new DimeError("Variable %v is already defined. Variables can only have one definition.", node.value.pos, [node.value]);
-    } else {
+    const op = node.value.value;
+
+    let notDefiners = ["++", "--", "+=", "-=", "*=", "%="];
+
+    if (func.variables.hasVariable(varName) && !notDefiners.includes(op)) {
+      new DimeError("Variable %v is already defined. Variables can only have one definition.", left.value.pos, [left.value]);
+    } else if (!notDefiners.includes(op)) {
       func.variables.addVariable(varName, left);
     }
 
-    const rType = this.getRType(right).value.value;
+    let rType = this.getRType(right)?.value?.value;
+    if (!rType) {
+      switch (op) {
+        case "--":
+        case "++":
+          rType = "i32";
+          break;
+      }
+    }
+
     if (varType !== rType)
       new DimeError(`Cannot assign a '${rType}' to '${varType}' on variable %v. Type mismatch.`, right.value.pos, [left.value])
 
-    this.compile(left);
+    if (!notDefiners.includes(op))
+      this.compile(left);
+    else {
+      this.code.push(`\t\tlocal.get \$${varName}`);
+    }
+
+    if (op == "++") {
+      this.code.push(`\t\ti32.const 1`);
+      this.code.push(`\t\ti32.add`);
+    } else if (op == "--") {
+      this.code.push(`\t\ti32.const 1`);
+      this.code.push(`\t\ti32.sub`);
+    }
 
     this.compile(right);
-    let value = (this.code.pop() as string).trim();
+    
+    if (!notDefiners.includes(op)) {
+      let value = (this.code.pop() as string).trim();
+      this.code.push(`\t\t(local.set \$${varName} (${value}))`);
+    } else {
+      this.code.push(`\t\t(local.set \$${varName})`);
+    }
 
-    this.code.push(`\t\t(local.set \$${varName} (${value}))`);
   }
 
   compileVariable(node: AST) {
@@ -347,14 +436,27 @@ export default class Compiler {
     let wasmType = conversions[varType];
 
     func.variables.addVariable(varName, node);
-    this.code.push(`\t\t(local \$${varName} ${wasmType})`);
+    let pos = this.currentFunction?.headerLoc as number;
+    let newVar = [`\t\t(local \$${varName} ${wasmType})`];
+
+    this.code = this.code.slice(0, pos + 1).concat(newVar).concat(this.code.slice(pos + 1));
+
+    // this.code.push(`\t\t(local \$${varName} ${wasmType})`);
   }
 
   getRType(node: AST): AST {
     if (node.kind == ASTTypes.Identifier) {
+      if (!this.currentFunction?.variables?.hasVariable(node.value.value)) {
+        return this.customTypes[node.value.value];
+      }
+
       const variable = this.currentFunction?.variables.getVariable(node.value.value) as Variable;
 
       return variable.dataType;
+    } else if (node.kind == ASTTypes.FunctionCall) {
+      const func = this.funcList.functions[node.value.value];
+
+      return func.ast.dataType;
     } else {
       return node.dataType;
     }
@@ -363,36 +465,24 @@ export default class Compiler {
   compileBinaryOp(node: AST) {
     const { left, op, right } = node;
 
-    this.compile(right);
     this.compile(left);
+    this.compile(right);
 
-    let lDataType;
-    let rDataType;
+    let lDataType = this.getRType(left);
+    let rDataType = this.getRType(right);
 
-    if (left.kind == ASTTypes.Identifier) {
-      const variable = this.currentFunction?.variables.getVariable(left.value.value) as Variable;
-
-      lDataType = variable.dataType.value.value;
-    } else {
-      lDataType = left.dataType.value.value;
-    }
-
-    if (right.kind == ASTTypes.Identifier) {
-      const variable = this.currentFunction?.variables.getVariable(right.value.value) as Variable;
-
-      rDataType = variable.dataType.value.value;
-    } else {
-      rDataType = right.dataType.value.value;
-    }
-
-    if (lDataType !== rDataType)
+    if (lDataType.value.value !== rDataType.value.value)
       new DimeError("Cannot perform operation. Type mismatch.", op.pos, [op]);
 
-    const binType = conversions[lDataType];
+    const binType = conversions[lDataType.value.value];
     
     if (op.value == "+") {
       this.code.push(`\t\t${binType}.add`);
+    } else if (op.value == "++") {
+      this.code.push(`\t\t${binType}.add`);
     } else if (op.value == "-") {
+      this.code.push(`\t\t${binType}.sub`);
+    } else if (op.value == "--") {
       this.code.push(`\t\t${binType}.sub`);
     } else if (op.value == "*") {
       this.code.push(`\t\t${binType}.mul`);
@@ -400,7 +490,108 @@ export default class Compiler {
       this.code.push(`\t\t${binType}.div_s`);
     } else if (op.value == "%") {
       this.code.push(`\t\t${binType}.div_s`)
+    } else if (op.value == "&&") {
+      this.code.push(`\t\t${binType}.and`);
+    } else if (op.value == "||") {
+      this.code.push(`\t\t${binType}.or`);
+    } else if (op.value == ">") {
+      this.code.push(`\t\t${binType}.gt_s`);
+    } else if (op.value == "<") {
+      this.code.push(`\t\t${binType}.lt_s`);
+    } else if (op.value == "==") {
+      this.code.push(`\t\t${binType}.eq`);
     }
+  }
+
+  compileIf(node: AST) {
+    // condition, block, els
+
+    const { condition, block, els } = node;
+
+    // TODO: Type check condition
+    this.compile(condition);
+
+    let ifHeaderLoc = this.code.length;
+    this.code.push(`\t\tif`);
+
+    let oldIfBlock = this.currentIfBlock;
+    this.currentIfBlock = {
+      thenReturn: false,
+      headerLoc: ifHeaderLoc
+    }
+
+    for (const exp of block)  {
+      this.compile(exp);
+    }
+    this.currentIfBlock = oldIfBlock;
+
+    if (block.length == 0) {
+      this.code.push("\t\tnop");
+    }
+
+    if (els) {
+      this.currentIfBlock = {
+        elseReturn: false,
+        headerLoc: ifHeaderLoc
+      }
+      this.code.push(`\n\t\telse\n`);
+
+      for (const exp of els.block) {
+        this.compile(exp);
+      }
+      this.currentIfBlock = oldIfBlock;
+
+      if (els.block.length == 0) {
+        this.code.push("\t\tnop");
+      }
+  }
+
+    this.code.push(`\n\t\tend`);
+  }
+
+  compileWhileLoop(node: AST) {
+    const { condition, block } = node;
+
+    const oldIfBlock = this.currentIfBlock;
+    this.currentIfBlock = {
+      thenReturn: false,
+      headerLoc: this.code.length
+    };
+
+    this.code.push(`\t\t(block $block_${this.currentFunction?.blocks}`);
+    let outerBlock = this.currentFunction?.blocks as number;
+    
+    (this.currentFunction as FunctionDef).blocks++;
+    let oldHeaderLen = this.code[this.code.length - 1].length;
+
+
+    this.code.push(`\t\t(loop $loop_${this.currentFunction?.blocks}`);
+    let loopBlock = this.currentFunction?.blocks as number;
+    (this.currentFunction as FunctionDef).blocks++;
+
+    this.compile(condition);
+    this.code.push(`\t\ti32.const 1`);
+    this.code.push(`\t\ti32.xor`);
+    this.code.push(`\t\tbr_if \$block_${outerBlock}`);
+
+    for (const exp of block) {
+      this.compile(exp);
+    }
+
+    if (this.currentFunction?.returnValue) {
+      this.code[this.currentIfBlock.headerLoc] += ` (result ${this.currentFunction?.returnValue as string})`;
+      this.code[this.currentIfBlock.headerLoc + 1] += ` (result ${this.currentFunction?.returnValue as string})`;
+    }
+
+    let returned = this.currentIfBlock.thenReturn;
+
+    this.currentIfBlock = oldIfBlock;
+
+    if (!returned) {
+      this.code.push(`\t\tbr \$loop_${loopBlock}`);
+    }
+    this.code.push(`\t\t)\n\t\t)`);
+
   }
 
   compile(node: AST): keyof typeof ASTTypes {
@@ -456,6 +647,14 @@ export default class Compiler {
       case ASTTypes.Variable:
         this.compileVariable(node);
         return "Variable";
+
+      case ASTTypes.If:
+        this.compileIf(node);
+        return "If";
+
+      case ASTTypes.WhileLoop:
+        this.compileWhileLoop(node);
+        return "WhileLoop";
 
       default:
         return "Null";

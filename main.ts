@@ -22,7 +22,5 @@ function wat_printStr(index: number) {
   }
 }
 
-console.log(main());
-wat_printStr(helloWorld());
-wat_printStr(nice());
+console.log(main(5));
 // wat_printStr(main());

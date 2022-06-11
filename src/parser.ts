@@ -167,6 +167,7 @@ export default class Parser {
         const expr = new AST(kind, op);
         expr.left = left;
         expr.dataType = expr.left.dataType;
+
         if (left.kind == ASTTypes.Null) {
           if (noRightHand.includes(opval)) {
             expr.left = this.pBinary(this.pAll(), 0);
@@ -179,6 +180,9 @@ export default class Parser {
           expr.right = new AST();
         } else {
           expr.right = this.pBinary(this.pAll(), newPrec);
+          if (!expr.dataType) {
+            expr.dataType = expr.right.dataType;
+          }
         }
 
         return this.pBinary(expr, prec);
@@ -421,6 +425,53 @@ export default class Parser {
     return whileStmt;
   }
 
+  pFor(): AST {
+    const forTok = this.curTok;
+    this.advance(); // skip over 'for'
+
+    const forStmt = new AST(ASTTypes.ForLoop, forTok);
+
+    this.skipOver(this.curTok, TokenTypes.Delimiter, "(");
+
+    // assignment
+    if (!this.curTok.equals(TokenTypes.Delimiter, ";")) {
+      forStmt.assign = this.pExpression();
+      if (this.curTok.equals(TokenTypes.Delimiter, ";"))
+        this.advance();
+    } else {
+      this.advance();
+    }
+
+    // condition
+    if (!this.curTok.equals(TokenTypes.Delimiter, ";")) {
+      forStmt.condition = this.pExpression();
+      if (this.curTok.equals(TokenTypes.Delimiter, ";"))
+        this.advance();
+    } else {
+      forStmt.condition = new AST(ASTTypes.Boolean, new Token(TokenTypes.Boolean, "true", forTok.pos.copy()));
+      this.advance();
+    }
+
+    // increment
+    if (!this.curTok.equals(TokenTypes.Delimiter, ";")) {
+      forStmt.right = this.pExpression();
+      if (this.curTok.equals(TokenTypes.Delimiter, ";"))
+        this.advance();
+    } else {
+      this.advance();
+    }
+    this.skipOver(this.curTok, TokenTypes.Delimiter, ")");
+
+    forStmt.condition = this.pExpression();
+    if (this.curTok.equals(TokenTypes.Delimiter, "{")) {
+      forStmt.block = this.pDelimiters("{", "}");
+    } else {
+      forStmt.block = [this.pExpression()];
+    }
+
+    return forStmt;
+  }
+
   pInclude(): AST {
     const includeTok = this.curTok;
     this.advance(); // skip over 'include'
@@ -510,6 +561,9 @@ export default class Parser {
 
     if (this.curTok.equals(TokenTypes.Keyword, "while"))
       return this.pWhile();
+
+    if (this.curTok.equals(TokenTypes.Keyword, "For"))
+      return this.pFor();
 
     if (this.curTok.equals(TokenTypes.Keyword, "include"))
       return this.pInclude();
