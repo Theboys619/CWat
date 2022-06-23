@@ -1,13 +1,12 @@
 extern func void print_str(x: str);
 
 export func i32 main(x: i32) {
-  
   let i32 y = 0;
 
-  while (y < 5) {
+  while (y < x) {
     print_str("Hello, I am in a loop!\n")
     y++;
   }
 
-  return 1;
+  return y;
 }

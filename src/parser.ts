@@ -9,6 +9,7 @@ import Lexer, {
   assignments,
   noRightHand
 } from "./lexer.ts";
+import { Type } from "./type.ts";
 
 export default class Parser {
   currentFile: string;
@@ -192,7 +193,7 @@ export default class Parser {
     return left;
   }
 
-  pCheckSubType(dataType: AST): AST {
+  pCheckSubType(dataType: Type): Type {
     // let obj[5] x = {};
     // let obj[obj[2]] y = {};
     
@@ -200,15 +201,18 @@ export default class Parser {
       this.advance();
       
       if (this.curTok.equals(TokenTypes.Integer)) {
-        dataType.block.push(new AST(ASTTypes.ArrayType, this.curTok));
+        dataType.addSubType(new Type(this.curTok), true);
         this.advance();
       } else if (!this.curTok.equals(TokenTypes.Delimiter, "]")) {
-        const subType = new AST(ASTTypes.ArrayType, this.curTok);
-        subType.block = [];
-        
-        const nestedType = this.pDataType();
-        subType.block.push(nestedType);
-        dataType.block.push(subType);
+        const subType: Type = this.pDataType();
+        dataType.addSubType(subType, true);
+
+        while (this.curTok.equals(TokenTypes.Delimiter, ",")) {
+          this.advance();
+          
+          const subType: Type = this.pDataType();
+          dataType.addSubType(subType, true);
+        }
       }
       
       if (this.curTok.equals(TokenTypes.Delimiter, "]")) {
@@ -220,22 +224,25 @@ export default class Parser {
       }
     }
 
-    if (this.curTok.equals(TokenTypes.Delimiter, "<")) {
+    if (this.curTok.equals(TokenTypes.Operator, "<")) {
       this.advance();
       
       if (this.curTok.equals(TokenTypes.Integer)) {
-        dataType.block.push(new AST(ASTTypes.GenericType, this.curTok));
+        dataType.addSubType(new Type(this.curTok));
         this.advance();
-      } else if (!this.curTok.equals(TokenTypes.Delimiter, ">")) {
-        const subType = new AST(ASTTypes.GenericType, this.curTok);
-        subType.block = [];
-        
-        const nestedType = this.pDataType();
-        subType.block.push(nestedType);
-        dataType.block.push(subType);
+      } else if (!this.curTok.equals(TokenTypes.Operator, ">")) {
+        const subType: Type = this.pDataType();
+        dataType.addSubType(subType);
+
+        while (this.curTok.equals(TokenTypes.Delimiter, ",")) {
+          this.advance();
+
+          const subType: Type = this.pDataType();
+          dataType.addSubType(subType);
+        }
       }
       
-      if (this.curTok.equals(TokenTypes.Delimiter, ">")) {
+      if (this.curTok.equals(TokenTypes.Operator, ">")) {
         this.advance();
       }
     }
@@ -243,9 +250,8 @@ export default class Parser {
     return dataType;
   }
 
-  pDataType(): AST {
-    let dataType = new AST(ASTTypes.DataType, this.curTok);
-    dataType.block = [];
+  pDataType(): Type {
+    let dataType = new Type(this.curTok);
     this.advance();
     dataType = this.pCheckSubType(dataType);
 
@@ -259,7 +265,7 @@ export default class Parser {
   pVariable(constant: boolean): AST {
     this.advance(); // skip over 'let' or 'const'
     
-    const dataType: AST = this.pDataType();
+    const dataType: Type = this.pDataType();
 
     const identifierTok = this.curTok;
     const varStmt = new AST(ASTTypes.Variable, identifierTok);
@@ -274,6 +280,7 @@ export default class Parser {
 
   pFunction(isExported: boolean = false): AST {
     this.advance(); // skip over 'func' keyword
+
 
     const dataType = this.pDataType();
 
@@ -602,32 +609,32 @@ export default class Parser {
       this.curTok.equals(TokenTypes.Keyword, "false")
     ) {
       oldTok.kind = ASTTypes.Boolean;
-      oldTok.dataType = new AST(ASTTypes.DataType, new Token(TokenTypes.Datatype, "i32", oldTok.value.pos));
+      oldTok.dataType = new Type(new Token(TokenTypes.Datatype, "i32", oldTok.value.pos));
       this.advance();
 
       return oldTok;
     } else if (this.curTok.equals(TokenTypes.String)) {
       oldTok.kind = ASTTypes.String;
-      oldTok.dataType = new AST(ASTTypes.DataType, new Token(TokenTypes.Datatype, "str", oldTok.value.pos));
+      oldTok.dataType = new Type(new Token(TokenTypes.Datatype, "str", oldTok.value.pos));
 
       this.advance();
 
       return oldTok;
     } else if (this.curTok.equals(TokenTypes.Char)) {
       oldTok.kind = ASTTypes.Char;
-      oldTok.dataType = new AST(ASTTypes.DataType, new Token(TokenTypes.Datatype, "char", oldTok.value.pos));
+      oldTok.dataType = new Type(new Token(TokenTypes.Datatype, "char", oldTok.value.pos));
 
       return oldTok;
     } else if (this.curTok.equals(TokenTypes.Integer)) {
       oldTok.kind = ASTTypes.Integer;
-      oldTok.dataType = new AST(ASTTypes.DataType, new Token(TokenTypes.Datatype, "i32", oldTok.value.pos));
+      oldTok.dataType = new Type(new Token(TokenTypes.Datatype, "i32", oldTok.value.pos));
 
       this.advance();
 
       return oldTok;
     } else if (this.curTok.equals(TokenTypes.Double)) {
       oldTok.kind = ASTTypes.Double;
-      oldTok.dataType = new AST(ASTTypes.DataType, new Token(TokenTypes.Datatype, "f64", oldTok.value.pos));
+      oldTok.dataType = new Type(new Token(TokenTypes.Datatype, "f64", oldTok.value.pos));
 
       this.advance();
 

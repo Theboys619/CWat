@@ -1,0 +1,32 @@
+// This code does not compile it just demonstrates the syntax and what will be possible later on
+import * as Canvas from "std/canvas";
+// import createCanvas from "std/canvas";
+
+class TestClass {
+  i32 length;
+
+  func TestClass() {
+    this.length = 0;
+    // or 'length = 0;'
+  };
+}
+
+class Array<T> extends TestClass {
+  T[] arr;
+
+  func Array() {};
+};
+
+extern func void print_str(x: str);
+
+export func Array<i32> main(x: i32) {
+  
+  let i32 y = 0;
+
+  while (y < 5) {
+    print_str("Hello, I am in a loop!\n")
+    y++;
+  }
+
+  return Array();
+}

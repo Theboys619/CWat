@@ -1,4 +1,5 @@
 import Token, { TokenTypes, Position } from "./token.ts";
+import { Type } from "./type.ts";
 
 const astTypeDef = [
   "Null",
@@ -64,7 +65,7 @@ export const ASTTypes: Record<typeof astTypeDef[number], typeof astTypeDef[numbe
 export default class AST {
   kind: string;
   value: Token;
-  dataType!: AST;
+  dataType!: Type;
   arrayPtr: number = 0;
 
   left!: AST;

@@ -10,6 +10,7 @@ import Lexer, {
   noRightHand
 } from "./lexer.ts";
 import Parser from "./parser.ts";
+import { Type } from "./type.ts";
 
 import { path as Path, exists, mkdir, readFile, readFileSync, writeFile } from "./utils.ts";
 
@@ -64,9 +65,9 @@ class Variable {
   name: string;
   index: number;
 
-  dataType: AST;
+  dataType: Type;
   
-  constructor(name: string, index: number, dataType: AST) {
+  constructor(name: string, index: number, dataType: Type) {
     this.name = name;
     this.index = index;
     this.dataType = dataType;
@@ -121,6 +122,16 @@ class FunctionDef {
 
     this.variables = new VariableList();
   }
+
+  resolveType(node: AST): Type {
+    switch (node.kind) {
+      case ASTTypes.Identifier: {
+        return this.variables.getVariable(node.value.value).dataType;
+      }
+    }
+
+    return new Type(new Token(TokenTypes.Datatype, "void"));
+  }
 }
 
 class FunctionList {
@@ -156,7 +167,7 @@ export default class Compiler {
   currentFunction: FunctionDef | null;
   currentIfBlock?: Record<string, any>;
 
-  customTypes: Record<string, AST>;
+  customTypes: Record<string, Type>;
 
   constructor(ast?: AST) {
     this.ast = ast;
@@ -226,10 +237,7 @@ export default class Compiler {
     for (const arg of args) {
       const argTypeNode = arg.dataType;
       const argName = arg.value.value;
-      let argType = argTypeNode.value.value;
-
-      if (argType == "char" || argType == "str" || argType == "bool")
-        argType = "i32";
+      let argType = argTypeNode.convertType();
 
       funcHeader += ` (param \$${argName} ${argType})`;
 
@@ -295,22 +303,26 @@ export default class Compiler {
 
     (this.currentFunction as FunctionDef).hasReturned = true;
 
-    const typeNode = this.currentFunction?.ast.dataType as AST;
-    const funcReturnTNode = node.dataType;
-    let funcReturnType = typeNode.value.value;
+    const funcReturnType = this.currentFunction?.ast.dataType as Type;
+    let funcReturnTNode = node.dataType;
 
-    if (funcReturnType != typeNode.value.value) {
+    if (!funcReturnTNode) {
+      if (node.assign && node.assign.kind == ASTTypes.Identifier) {
+        funcReturnTNode = this.currentFunction?.resolveType(node.assign) as Type;
+      } else {
+        funcReturnTNode = new Type(new Token(TokenTypes.Datatype, "void", node.value.pos.copy()));
+      }
+    }
+
+    if (!funcReturnType.compareTo(funcReturnTNode)) {
       new DimeError(
-        `Invalid value returned. Value has type '${funcReturnType}' while function has '${typeNode.value.value}.'`,
+        `Invalid value returned. Value has type '${funcReturnTNode.toString()}' while function has '${funcReturnType.toString()}.'`,
         node.assign.value.pos || null, [node.value]
       );
     }
 
-    if (funcReturnType == "void")
+    if (funcReturnType.convertType() == "void")
       return;
-
-    if (funcReturnType == "char" || funcReturnType == "str" || funcReturnType == "bool")
-      funcReturnType = "i32";
 
     if (!this.currentFunction)
       return;
@@ -320,9 +332,9 @@ export default class Compiler {
       index = 1;
     }
 
-    this.code[this.currentFunction?.headerLoc as number] += ` (result ${funcReturnType})`;
-    this.code[(this.currentFunction?.headerLoc as number) + index] += ` (result ${funcReturnType})`;
-    (this.currentFunction as FunctionDef).returnValue = funcReturnType;
+    this.code[this.currentFunction?.headerLoc as number] += ` (result ${funcReturnType.convertType()})`;
+    this.code[(this.currentFunction?.headerLoc as number) + index] += ` (result ${funcReturnType.convertType()})`;
+    (this.currentFunction as FunctionDef).returnValue = funcReturnType.convertType();
 
     if (this.currentIfBlock) {
       if (this.currentIfBlock.elseReturn === false) {
@@ -385,8 +397,8 @@ export default class Compiler {
     // console.log(node, left);
 
     const varName = left.value.value;
-    const varType = this.getRType(left).value.value;
-    let wasmType = conversions[varType];
+    const varType = this.getRType(left);
+    const varTypeStr = varType.convertType();
 
     const op = node.value.value;
 
@@ -398,18 +410,20 @@ export default class Compiler {
       func.variables.addVariable(varName, left);
     }
 
-    let rType = this.getRType(right)?.value?.value;
+    let rType = this.getRType(right);
     if (!rType) {
       switch (op) {
         case "--":
         case "++":
-          rType = "i32";
+          rType = new Type(new Token(TokenTypes.Datatype, "i32")); // weird ik
           break;
       }
     }
 
-    if (varType !== rType)
-      new DimeError(`Cannot assign a '${rType}' to '${varType}' on variable %v. Type mismatch.`, right.value.pos, [left.value])
+    let rTypeStr = rType.convertType();
+
+    if (!varType.compareTo(rType))
+      new DimeError(`Cannot assign a '${rTypeStr}' to '${varTypeStr}' on variable %v. Type mismatch.`, right.value.pos, [left.value])
 
     if (!notDefiners.includes(op))
       this.compile(left);
@@ -439,19 +453,18 @@ export default class Compiler {
   compileVariable(node: AST) {
     const func = this.currentFunction as FunctionDef;
     const varName = node.value.value;
-    const varType = node.dataType.value.value;
-    let wasmType = conversions[varType];
+    const varType = node.dataType.convertType();
 
     func.variables.addVariable(varName, node);
     let pos = this.currentFunction?.headerLoc as number;
-    let newVar = [`\t\t(local \$${varName} ${wasmType})`];
+    let newVar = [`\t\t(local \$${varName} ${varType})`];
 
     this.code = this.code.slice(0, pos + 1).concat(newVar).concat(this.code.slice(pos + 1));
 
     // this.code.push(`\t\t(local \$${varName} ${wasmType})`);
   }
 
-  getRType(node: AST): AST {
+  getRType(node: AST): Type {
     if (node.kind == ASTTypes.Identifier) {
       if (!this.currentFunction?.variables?.hasVariable(node.value.value)) {
         return this.customTypes[node.value.value];
@@ -478,10 +491,10 @@ export default class Compiler {
     let lDataType = this.getRType(left);
     let rDataType = this.getRType(right);
 
-    if (lDataType.value.value !== rDataType.value.value)
+    if (!lDataType.compareTo(rDataType))
       new DimeError("Cannot perform operation. Type mismatch.", op.pos, [op]);
 
-    const binType = conversions[lDataType.value.value];
+    const binType = lDataType.convertType();
     
     if (op.value == "+") {
       this.code.push(`\t\t${binType}.add`);
@@ -612,19 +625,13 @@ export default class Compiler {
     let funcReturnType = ``;
 
     for (const arg of args) {
-      let argType = this.getRType(arg).value.value;
-
-      if (argType == "char" || argType == "str" || argType == "bool")
-        argType = "i32";
+      const argType = this.getRType(arg).convertType();
 
       funcParamList += ` (param ${argType})`;
     }
 
-    if (dataType || this.getRType(assign).value.value != "void") {
-      let argType = this.getRType(assign).value.value;
-
-      if (argType == "char" || argType == "str" || argType == "bool")
-        argType = "i32";
+    if (dataType || this.getRType(assign).convertType() != "void") {
+      const argType = this.getRType(assign).convertType();
 
       if (argType != "void")
         funcReturnType = ` (result ${argType})`;
