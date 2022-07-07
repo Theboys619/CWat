@@ -10,6 +10,8 @@ const astTypeDef = [
   "Integer",
   "Double",
   "Datatype",
+  "Class",
+  "Property",
   "Function",
   "FunctionDef",
   "FunctionCall",
@@ -40,6 +42,8 @@ export const ASTTypes: Record<typeof astTypeDef[number], typeof astTypeDef[numbe
   "Integer": "Integer",
   "Double": "Double",
   "Datatype": "Datatype",
+  "Class": "Class",
+  "Property": "Property",
   "Function": "Function",
   "FunctionDef": "FunctionDef",
   "FunctionCall": "FunctionCall",
@@ -82,11 +86,15 @@ export default class AST {
   access!: AST;
   parent!: AST;
 
+  cls!: AST;
+
   isOpBefore: boolean = false;
   isConst: boolean = false;
   isExtern: boolean = false;
   isExported: boolean = false;
   isSubscript: boolean = false;
+  isMethod: boolean = false;
+  isConstructor: boolean = false;
 
   constructor(kind: string = "Null", value: Token = new Token()) {
     this.kind = kind;

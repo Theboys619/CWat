@@ -88,6 +88,9 @@ class VariableList {
   }
 
   addVariable(name: string, node: AST): Variable {
+    if (this.hasVariable(name))
+      return this.variables[name];
+
     const variable = (this.variables[name] = new Variable(name, this.varCount, node.dataType));
     this.varCount++;
 
@@ -154,6 +157,49 @@ class FunctionList {
   }
 }
 
+export class DimeClass {
+  name: string;
+  ast: AST;
+  dataType: Type;
+  index: number;
+
+  properties: Record<string, DimeClass | Variable>;
+  methods: FunctionList;
+
+  propLength: number;
+
+  constructor(ast: AST) {
+    this.name = ast.value.value;
+    this.ast = ast;
+    this.dataType = ast.dataType;
+
+    this.index = 0;
+
+    this.properties = {};
+    this.propLength = 0;
+    this.methods = new FunctionList();
+  }
+
+  addProperty(name: string, prop: DimeClass | Variable): DimeClass | Variable {
+    prop.index = this.propLength++;
+    this.properties[name] = prop;
+
+    return prop;
+  }
+
+  hasMethod(name: string): boolean {
+    return this.methods.hasFunction(name);
+  }
+
+  addMethodNew(ast: AST, isDef = false): FunctionDef {
+    return this.methods.addFunction(ast, isDef);
+  }
+
+  addMethod(func: FunctionDef): FunctionDef {
+    return (this.methods.functions[func.name] = func);
+  }
+}
+
 export default class Compiler {
   code: string[];
   ast?: AST;
@@ -167,6 +213,7 @@ export default class Compiler {
   currentFunction: FunctionDef | null;
   currentIfBlock?: Record<string, any>;
 
+  classes: Record<string, DimeClass>;
   customTypes: Record<string, Type>;
 
   constructor(ast?: AST) {
@@ -175,12 +222,13 @@ export default class Compiler {
 
     this.stringList = new StringList();
     this.funcList = new FunctionList();
+    this.classes = {};
     this.customTypes = {};
 
     this.codeTop = ["(module"];
 
     this.currentFunction = null;
-  };
+  }
 
   getFullCode(): string {
     let fullCode = this.codeTop.join("\n") + "\n";
@@ -194,6 +242,23 @@ export default class Compiler {
 
       fullCode += `\t(data (i32.const ${index}) \"${string}\")\n`;
     }
+    fullCode += `\t(global $memoryTop (mut i32) (i32.const ${strMemSize}))\n`;
+
+    fullCode +=
+    `\t(func $initObject (export "initObject") (param $size i32) (result i32)
+    (local $fullSize i32)
+    local.get $size
+    i32.const 4
+    i32.mul
+    local.set $fullSize
+
+    global.get $memoryTop
+    global.get $memoryTop
+    local.get $fullSize
+    i32.add
+
+    global.set $memoryTop
+  )\n`;
     
     fullCode += this.code.join("\n") + "\n)";
 
@@ -210,6 +275,14 @@ export default class Compiler {
     if (!this.funcList.hasFunction(funcName))
       new DimeError(`Trying to call function ${funcName}, but it does not exist!`, node.value.pos, [node.value]);
 
+    const func = this.funcList.functions[funcName];
+    if (func.ast.isConstructor) {
+      const cls = this.classes[func.ast.cls.dataType.toString()].propLength;
+
+      this.code.push(`\t\ti32.const ${cls}`);
+      this.code.push(`\t\tcall $initObject`);
+    }
+
     for (let arg of node.args) {
       this.compile(arg)
     }
@@ -223,10 +296,24 @@ export default class Compiler {
 
     const typeNode = node.dataType;
     const funcName = node.value.value;
+    const isMethod = node.isMethod;
     const args = node.args;
     const block = node.block;
 
-    this.currentFunction = this.funcList.addFunction(node, false);
+    let newFunc;
+
+    if (isMethod) {
+      if (node.isConstructor) {
+        newFunc = this.funcList.addFunction(node, false);
+        this.classes[node.cls.dataType.toString()].addMethod(newFunc);
+      } else {
+        newFunc = this.classes[node.cls.dataType.toString()].addMethodNew(node, false);
+      }
+    } else {
+      newFunc = this.funcList.addFunction(node, false)
+    }
+
+    this.currentFunction = newFunc as FunctionDef;
 
     let funcHeader = `\t(func \$${funcName}`;
 
@@ -263,29 +350,13 @@ export default class Compiler {
         funcReturn = exp;
     }
 
-  //   if (funcHasReturn) {
-  //     const funcReturnTNode = funcReturn?.dataType;
-  //     let funcReturnType = funcReturnTNode?.value?.value;
+    if (newFunc.ast.isConstructor) {
+      this.code[this.currentFunction.headerLoc] += ` (result i32)`;
+      this.code.push("\t\t)\n\t\tlocal.get $this\n\t)");
+    } else {
+      this.code.push("\t\t)\n\t)");
+    }
 
-  //     if (!funcReturnType)
-  //       funcReturnType = typeNode.value.value;
-
-  //     if (funcReturnType != typeNode.value.value && funcReturn) {
-  //       new DimeError(
-  //         `Invalid value returned. Value has type '${funcReturnType}' while function has '${typeNode.value.value}.'`,
-  //         funcReturn.assign.value.pos || null, [funcReturn.value]
-  //       );
-  //     }
-
-  //     if (funcReturnType == "char" || funcReturnType == "str" || funcReturnType == "bool")
-  //       funcReturnType = "i32";
-
-  //     funcHeader += ` (result ${funcReturnType})`;
-  //     this.code[returnBlockLoc] += ` (result ${funcReturnType})`;
-  // }
-
-  //   this.code[funcHeaderLoc] = funcHeader;
-    this.code.push("\t\t)\n\t)");
   }
 
   compileReturn(node: AST) {
@@ -327,9 +398,9 @@ export default class Compiler {
     if (!this.currentFunction)
       return;
 
-    let index = this.currentFunction.variables.varCount - this.currentFunction.ast.args.length;
-    if (index <= 0) {
-      index = 1;
+    let index = this.currentFunction.variables.varCount;
+    if (this.currentFunction.ast.args.length <= 0) {
+      index += 1;
     }
 
     this.code[this.currentFunction?.headerLoc as number] += ` (result ${funcReturnType.convertType()})`;
@@ -370,7 +441,94 @@ export default class Compiler {
     // this.code.push(`\t\ti32.load8_u`);
   }
 
-  compileIdentifier(node: AST) {
+  getAccess(prev: [Variable, AST], access: AST): AST {
+    const prevVar = prev[0];
+    const prevAST = prev[1];
+
+    const isAssignment = access.kind === ASTTypes.Assign;
+    const isBinary = access.kind === ASTTypes.Binary;
+
+    let accessor = access;
+    if (isAssignment || isBinary) {
+      accessor = access.left;
+    }
+
+    // TODO: FIX CUSTOM TYPES!
+    let prevType;
+    if (!(prevType = this.classes[prevVar.dataType.toString()])) {
+      new DimeError("Cannot access property!", accessor.value.pos, []);
+    }
+
+    let accessName = accessor.value.value;
+    if (accessor.isSubscript) {
+      if (accessor.kind === ASTTypes.Identifier) {
+        accessName = "";
+        const id = this.compileIdentifier(accessor);
+
+        if (id.dataType.toString() == "str") {
+          new DimeError("Cannot use subscript with strings!", accessor.value.pos, []);
+        } else if (id.dataType.toString() == "i32") {
+          this.code.push(`\t\ti32.add`);
+
+          if (!isAssignment) {
+            this.code.push(`\t\ti32.load`);
+          } else {
+            this.compile(access.right);
+            this.code.push(`\t\ti32.store`);
+          }
+        }
+      }
+    }
+
+    if (accessName) {
+      // console.log(accessName, prevType);
+      let prop;
+      if (!prevType.properties.hasOwnProperty(accessName)) {
+        if (!prevType.hasMethod(accessName)) {
+          new DimeError("Property does not exist!", accessor.value.pos, []);
+        }
+
+        if (accessor.kind !== ASTTypes.FunctionCall) {
+          new DimeError("You currently cannot access functions as properties!", accessor.value.pos, []);
+        }
+
+        const func = prevType.methods.functions[accessName];
+        
+        for (let arg of accessor.args) {
+          this.compile(arg)
+        }
+
+        this.code.push(`\t\tcall \$${func.name}`);
+
+        return access;
+      } else {
+        prop = prevType.properties[accessName]
+      }
+
+      if (prop instanceof DimeClass) {};
+      
+      if (prop instanceof Variable) {
+        // local.get variable
+        this.code.push(`\t\ti32.const ${prop.index}`);
+        this.code.push(`\t\ti32.add`);
+
+        if (!isAssignment) {
+          this.code.push(`\t\ti32.load`);
+        } else {
+          this.compile(access.right);
+          this.code.push(`\t\ti32.store`);
+        }
+
+        if (accessor.access) {
+          return this.getAccess([prop, accessor], accessor.access);
+        }
+      }
+    }
+
+    return access;
+  }
+
+  compileIdentifier(node: AST): AST {
     if (!this.currentFunction)
       new DimeError("TODO: Cannot create global variables! Tried using variable '%v.'", node.value.pos, [node.value]);
 
@@ -383,8 +541,13 @@ export default class Compiler {
     }
 
     const variable = func.variables.getVariable(varName);
-
     this.code.push(`\t\tlocal.get \$${variable.name}`);
+
+    if (node.access) {
+      return this.getAccess([variable, node], node.access);
+    }
+
+    return node;
   }
 
   compileAssign(node: AST) {
@@ -404,9 +567,9 @@ export default class Compiler {
 
     let notDefiners = ["++", "--", "+=", "-=", "*=", "%="];
 
-    if (func.variables.hasVariable(varName) && !notDefiners.includes(op)) {
+    if (left.kind === ASTTypes.Variable && func.variables.hasVariable(varName) && !notDefiners.includes(op)) {
       new DimeError("Variable %v is already defined. Variables can only have one definition.", left.value.pos, [left.value]);
-    } else if (!notDefiners.includes(op)) {
+    } else if (left.kind === ASTTypes.Variable && !notDefiners.includes(op)) {
       func.variables.addVariable(varName, left);
     }
 
@@ -640,6 +803,26 @@ export default class Compiler {
     this.codeTop.push(`\t(import "std" "${token.value}" (func \$${token.value}${funcParamList}${funcReturnType}))`);
   }
 
+  compileClass(node: AST) {
+    const dimeClass = new DimeClass(node);
+    this.classes[dimeClass.name] = dimeClass;
+
+    for (const exp of node.block) {
+      if (exp.kind === ASTTypes.Property) {
+        const varName = exp.value.value;
+        
+        const propsLength = Object.keys(dimeClass.properties).length;
+        dimeClass.addProperty(varName, new Variable(varName, propsLength, exp.dataType));
+      } else if (exp.kind === ASTTypes.Function) {
+        this.compile(exp);
+      } else {
+        new DimeError("Classes may only contain properties and methods!", exp.value.pos, []);
+      }
+    }
+
+    // this.customTypes[dimeClass.name] = dimeClass.dataType;
+  }
+
   compile(node: AST): keyof typeof ASTTypes {
     switch (node.kind) {
       case ASTTypes.Scope: {
@@ -705,6 +888,10 @@ export default class Compiler {
       case ASTTypes.Extern:
         this.compileExtern(node);
         return "Extern";
+
+      case ASTTypes.Class:
+        this.compileClass(node);
+        return "Class";
 
       default:
         return "Null";

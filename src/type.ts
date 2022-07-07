@@ -25,12 +25,14 @@ export class Type {
 
   subTypes: Type[];
   isArray: boolean;
+  isGeneric: boolean;
 
-  constructor(token: Token, isArray: boolean = false) {
+  constructor(token: Token, isArray: boolean = false, isGeneric: boolean = false) {
     this.value = token.value;
     this.token = token;
 
     this.isArray = isArray;
+    this.isGeneric = isGeneric;
 
     this.subTypes = [];
   }
@@ -80,6 +82,9 @@ export class Type {
 
   convertType(): string {
     if (this.subTypes.length > 0)
+      return "i32";
+
+    if (!conversions.hasOwnProperty(this.value))
       return "i32";
 
     return conversions[this.value];

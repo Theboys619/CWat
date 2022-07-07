@@ -33,6 +33,6 @@ function wat_printStr(index: number) {
 }
 
 let returnValue = main(5);
-console.log();
-console.log("Return value:", returnValue);
+// console.log(new Uint8Array(memory.buffer));
+console.log("\nReturn value:", returnValue);
 // wat_printStr(main());

@@ -20,6 +20,8 @@ export default class Parser {
   curTok: Token;
   index: number;
 
+  currentClass?: AST;
+
   constructor(tokens: Token[], currentFile: string = "Unknown") {
     this.tokens = tokens;
     this.currentFile = currentFile;
@@ -250,6 +252,48 @@ export default class Parser {
     return dataType;
   }
 
+  // Class<T<X>, V>
+  getGeneric(dataType: Type): Type {
+    if (this.curTok.equals(TokenTypes.Operator, "<")) {
+      this.advance();
+      
+      if (this.curTok.equals(TokenTypes.Integer)) {
+        dataType.addSubType(new Type(this.curTok));
+        this.advance();
+      } else if (!this.curTok.equals(TokenTypes.Operator, ">")) {
+        const subType: Type = new Type(this.curTok, false, true);
+        this.advance();
+
+        if (this.curTok.equals(TokenTypes.Operator, "<")) {
+          this.getGeneric(subType);
+        }
+        //const subType: Type = this.pDataType();
+        dataType.addSubType(subType);
+
+        while (this.curTok.equals(TokenTypes.Delimiter, ",")) {
+          this.advance();
+
+          const subType: Type = new Type(this.curTok, false, true);
+          this.advance();
+
+          if (this.curTok.equals(TokenTypes.Operator, "<")) {
+            this.getGeneric(subType);
+          }
+          //const subType: Type = this.pDataType();
+          dataType.addSubType(subType);
+          // const subType: Type = this.pDataType();
+          // dataType.addSubType(subType);
+        }
+      }
+      
+      if (this.curTok.equals(TokenTypes.Operator, ">")) {
+        this.advance();
+      }
+    }
+
+    return dataType;
+  }
+
   pDataType(): Type {
     let dataType = new Type(this.curTok);
     this.advance();
@@ -281,17 +325,43 @@ export default class Parser {
   pFunction(isExported: boolean = false): AST {
     this.advance(); // skip over 'func' keyword
 
-
-    const dataType = this.pDataType();
+    let dataType;
+    if (!this.currentClass || this.currentClass.value.value !== this.curTok.value) {
+      dataType = this.pDataType();
+    } else if (this.currentClass) {
+      dataType = this.currentClass.dataType;
+    } else {
+      dataType = new Type(new Token(TokenTypes.Datatype, "void"));
+    }
 
     const identifierTok = this.curTok;
     this.advance(); // skip over 'identifier'
 
     const funcStmt = new AST(ASTTypes.Function, identifierTok);
+
+    if (this.currentClass && this.currentClass.value.value === identifierTok.value) {
+      funcStmt.isConstructor = true;
+    }
+
+    if (this.currentClass) {
+      funcStmt.cls = this.currentClass;
+    }
+
+    const cls = this.currentClass;
+    this.currentClass = undefined;
+    
     funcStmt.args = this.pDelimiters("(", ")", ",", true);
+    if (cls) {
+      const thisPtr = new AST(ASTTypes.Variable, new Token(TokenTypes.Identifier, "this", this.curTok.pos.copy()));
+      thisPtr.dataType = cls.dataType;
+      funcStmt.args = [thisPtr, ...funcStmt.args];
+      funcStmt.isMethod = true;
+    }
+
     funcStmt.block = this.pDelimiters("{", "}");
     funcStmt.dataType = dataType;
     funcStmt.isExported = isExported;
+    this.currentClass = cls;
 
     return funcStmt;
   }
@@ -483,7 +553,7 @@ export default class Parser {
     const externTok = this.curTok;
     this.advance(); // skip over 'extern'
 
-    let externStmt = new AST(ASTTypes.Extern, externTok);
+    const externStmt = new AST(ASTTypes.Extern, externTok);
 
     if (this.curTok.equals(TokenTypes.Keyword, "func")) {
       this.advance(); // skip over 'func'
@@ -499,10 +569,42 @@ export default class Parser {
 
       externStmt.assign = funcStmt;
     } else if (this.curTok.equals(TokenTypes.Keyword, "let")) {
-
+      // TODO
     }
 
     return externStmt;
+  }
+
+  pClass(): AST {
+    this.advance(); // skip over 'class'
+
+    const classNameTok = this.curTok;
+    const cls = new AST(ASTTypes.Class, classNameTok);
+    const dataType = new Type(classNameTok, false, false);
+    this.advance();
+
+    if (this.curTok.equals(TokenTypes.Operator, "<")) {
+      this.getGeneric(dataType);
+    }
+
+    cls.dataType = dataType;
+    this.currentClass = cls;
+    cls.block = this.pDelimiters("{", "}");
+    this.currentClass = undefined;
+
+    return cls;
+  }
+
+  pProperty(): AST {
+    const dataType = this.pDataType();
+    const propNameTok = this.curTok;
+
+    const prop = new AST(ASTTypes.Property, propNameTok);
+    prop.dataType = dataType;
+
+    this.advance();
+
+    return prop;
   }
 
   pInclude(): AST {
@@ -526,26 +628,7 @@ export default class Parser {
     return stmt;
   }
 
-  // pDefineSize(): AST {
-  //   const dataType = this.curTok;
-
-  //   if (this.peek(3).equals(TokenTypes.Identifier)) {
-  //     return this.pVariable(false, dataType);
-  //   }
-
-  //   this.advance(); // dataType
-  //   this.advance(); // "["
-  //   const elementsTok = this.curTok; // 4
-  //   this.advance();
-  //   this.advance(); // "]"
-
-  //   const stmt = new AST(ASTTypes.StackAlloc, elementsTok);
-  //   stmt.dataType = dataType;
-
-  //   return stmt;
-  // }
-
-  $pAll(isFunc: boolean = false): AST {
+  $pAll(isFunc = false): AST {
     if (this.curTok.equals(TokenTypes.Delimiter, '(')) {
       this.skipOver(this.curTok, TokenTypes.Delimiter, '(');
       const expr = this.pExpression();
@@ -555,6 +638,12 @@ export default class Parser {
     }
 
     const oldTok = new AST(ASTTypes.Null, this.curTok);
+
+    if (this.currentClass) {
+      if (this.curTok.equals(TokenTypes.Identifier) || this.curTok.equals(TokenTypes.Datatype)) {
+        return this.pProperty();
+      }
+    }
 
     if (
       this.curTok.equals(TokenTypes.Keyword, "let")
@@ -595,7 +684,7 @@ export default class Parser {
     if (this.curTok.equals(TokenTypes.Keyword, "while"))
       return this.pWhile();
 
-    if (this.curTok.equals(TokenTypes.Keyword, "For"))
+    if (this.curTok.equals(TokenTypes.Keyword, "for"))
       return this.pFor();
 
     if (this.curTok.equals(TokenTypes.Keyword, "extern"))
@@ -603,6 +692,10 @@ export default class Parser {
 
     if (this.curTok.equals(TokenTypes.Keyword, "include"))
       return this.pInclude();
+
+    if (this.curTok.equals(TokenTypes.Keyword, "class")) {
+      return this.pClass();
+    }
 
     if (
       this.curTok.equals(TokenTypes.Keyword, "true") ||

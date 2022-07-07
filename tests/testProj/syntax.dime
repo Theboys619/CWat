@@ -7,7 +7,6 @@ class TestClass {
 
   func TestClass() {
     this.length = 0;
-    // or 'length = 0;'
   };
 }
 

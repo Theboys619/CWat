@@ -1,6 +1,20 @@
 extern func void print_str(x: str);
 
-export func i32 main(x: i32) {
+class Test {
+  i32 x;
+  str wows;
+
+  func Test(y: i32, f: str) {
+    this.x = y
+    this.wows = f;
+  }
+
+  func void print() {
+    print_str(this.wows);
+  }
+};
+
+export func Test main(x: i32) {
   let i32 y = 0;
 
   while (y < x) {
@@ -8,5 +22,8 @@ export func i32 main(x: i32) {
     y++;
   }
 
-  return y;
+  let Test z = Test(5, "Nice!!!");
+  z.print();
+
+  return z;
 }
