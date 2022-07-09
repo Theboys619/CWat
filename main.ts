@@ -32,7 +32,8 @@ function wat_printStr(index: number) {
   strIndices[index] = true;
 }
 
-let returnValue = main(5);
+let returnValue = main(3);
+console.log();
 // console.log(new Uint8Array(memory.buffer));
-console.log("\nReturn value:", returnValue);
+console.log("Return value:", returnValue);
 // wat_printStr(main());

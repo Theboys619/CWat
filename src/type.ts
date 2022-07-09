@@ -53,6 +53,10 @@ export class Type {
       } else {
         typeString += "<";
       }
+    } else {
+      if (this.isArray) {
+        typeString += "[";
+      }
     }
 
     let isFirst = true;
@@ -70,6 +74,10 @@ export class Type {
         typeString += "]";
       } else {
         typeString += ">";
+      }
+    } else {
+      if (this.isArray) {
+        typeString += "]";
       }
     }
 

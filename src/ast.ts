@@ -96,7 +96,7 @@ export default class AST {
   isMethod: boolean = false;
   isConstructor: boolean = false;
 
-  constructor(kind: string = "Null", value: Token = new Token()) {
+  constructor(kind: string = ASTTypes.Null, value: Token = new Token()) {
     this.kind = kind;
     this.value = value;
   }

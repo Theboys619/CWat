@@ -90,7 +90,7 @@ export default class Lexer {
     this.index = 0;
 
     this.curChar = this.input.length > 0 ? this.input[this.index] : '\0';
-    this.pos = new Position(filepath, 0, 0);
+    this.pos = new Position(filepath, 0, 1);
 
     this.tokens = [];
   }
@@ -99,12 +99,12 @@ export default class Lexer {
     this.pos.line = num;
   }
 
-  set column(num: number) {
-    this.pos.column = num;
-  }
-
   get line() {
     return this.pos.line;
+  }
+
+  set column(num: number) {
+    this.pos.column = num;
   }
 
   get column() {
@@ -192,6 +192,12 @@ export default class Lexer {
     return false;
   }
 
+  isSpecial(): boolean {
+    return (
+      this.curChar == "~"
+    );
+  }
+
   /**
    * Grabs the operator from the current character and checks to see if any other operator fits by using 'grab' plus and incremented i.
    * Then it returns the length of the operator
@@ -240,7 +246,7 @@ export default class Lexer {
       
       if (this.curChar == '\n') {
         this.tokens.push(new Token(TokenTypes.NewLine, "\\n", this.pos.copy()));
-        this.column = -1;
+        this.column = 0;
         this.line++;
 
         this.advance();
@@ -253,11 +259,21 @@ export default class Lexer {
           }
       }
 
+      if (this.isSpecial()) {
+        const tok = new Token(TokenTypes.Operator, this.curChar, this.pos.copy());
+        tok.pos.length = 1;
+
+        this.tokens.push(tok);
+
+        this.advance();
+      }
+
       if (this.isOperator() > 0) {
         const opLength: number = this.isOperator();
         const value: string = this.grab(opLength);
 
         const tok = new Token(TokenTypes.Operator, value, this.pos.copy());
+        tok.pos.length = value.length;
         this.tokens.push(tok);
 
         this.advance(opLength);
@@ -266,6 +282,7 @@ export default class Lexer {
       if (this.isDelimiter(this.curChar)) {
         const tok = new Token(TokenTypes.Delimiter, this.curChar, this.pos.copy());
         this.tokens.push(tok);
+        tok.pos.length = 1;
 
         this.advance();
       }
@@ -335,7 +352,6 @@ export default class Lexer {
 
         this.advance();
 
-        const tokType = quote == "\'" && val.length == 1 ? TokenTypes.Char : TokenTypes.String;
         prevPos.length = val.length + 2;
         const tok = new Token(TokenTypes.String, val, prevPos);
 

@@ -40,7 +40,7 @@ export class Position {
   column: number;
   length: number;
 
-  constructor(file: string = "Unknown", line: number = 0, column: number = 0, length: number = -1) {
+  constructor(file: string = "Unknown", line: number = 0, column: number = 1, length: number = -1) {
     this.file = file;
     this.line = line;
     this.column = column;

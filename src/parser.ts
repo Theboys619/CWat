@@ -45,7 +45,7 @@ export default class Parser {
   }
 
   isIgnore(tok: Token): boolean {
-    return tok.equals(TokenTypes.Delimiter, ";") || tok.equals(undefined, "\\n") || tok.equals(TokenTypes.NewLine);
+    return tok.equals(TokenTypes.Delimiter, ";") || tok.equals(TokenTypes.NewLine) || (!tok.equals(TokenTypes.String) && tok.equals(undefined, "\\n"));
   }
 
   isEOF(): boolean {
@@ -61,7 +61,7 @@ export default class Parser {
   }
 
   skipLinebreak(): void {
-    while (this.curTok.equals(TokenTypes.NewLine) || this.curTok.equals(undefined, "\\n")) {
+    while (!this.curTok.equals(TokenTypes.String) && (this.curTok.equals(TokenTypes.NewLine) || this.curTok.equals(undefined, "\\n"))) {
       this.advance();
     }
   }
@@ -179,6 +179,7 @@ export default class Parser {
         }
 
         expr.op = op;
+        
         if (noRightHand.includes(opval)) {
           expr.right = new AST();
         } else {
@@ -218,6 +219,7 @@ export default class Parser {
       }
       
       if (this.curTok.equals(TokenTypes.Delimiter, "]")) {
+        dataType.isArray = true;
         this.advance();
       }
 
@@ -358,7 +360,12 @@ export default class Parser {
       funcStmt.isMethod = true;
     }
 
-    funcStmt.block = this.pDelimiters("{", "}");
+    if (!this.curTok.equals(TokenTypes.Delimiter, "{")) {
+      funcStmt.kind = ASTTypes.FunctionDef;
+    } else {
+      funcStmt.block = this.pDelimiters("{", "}");
+    }
+
     funcStmt.dataType = dataType;
     funcStmt.isExported = isExported;
     this.currentClass = cls;
@@ -394,6 +401,7 @@ export default class Parser {
         isSubscript && (
           this.curTok.equals(TokenTypes.String)
           || this.curTok.equals(TokenTypes.Integer)
+          || noRightHand.includes(this.curTok.value)
         )
       )
     ) {
@@ -637,6 +645,17 @@ export default class Parser {
       return expr;
     }
 
+    if (this.curTok.equals(TokenTypes.Operator, "~")) {
+      this.skipOver(this.curTok, TokenTypes.Operator, '~');
+      const dataType = this.pDataType();
+      this.skipOver(this.curTok, TokenTypes.Operator, '~');
+      
+      const expr = this.pExpression();
+      expr.dataType = dataType;
+
+      return expr;
+    }
+
     const oldTok = new AST(ASTTypes.Null, this.curTok);
 
     if (this.currentClass) {
@@ -736,6 +755,10 @@ export default class Parser {
 
     if (this.curTok.equals(TokenTypes.Identifier)) {
       return this.pIdentifier(oldTok, isFunc);
+    }
+
+    if (noRightHand.includes(this.curTok.value)) {
+      return oldTok;     
     }
 
     new DimeSyntaxError(

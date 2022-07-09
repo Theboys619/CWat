@@ -1,18 +1,34 @@
 extern func void print_str(x: str);
+func i32 malloc(size: i32);
 
 class Test {
   i32 x;
-  str wows;
+  str msg;
 
   func Test(y: i32, f: str) {
     this.x = y
-    this.wows = f;
+    this.msg = f;
   }
 
   func void print() {
-    print_str(this.wows);
+    print_str(this.msg);
   }
 };
+
+export func void coolo() {
+  const str[6] x = cast(malloc(6), "str[6]"); // dynamic alloc. Alternative cast: '~i32[6]~malloc(6)'
+  let i32 i = 0;
+  x[i++] = "This";
+  x[i++] = "Is";
+  x[i++] = "Pretty";
+  x[i++] = "Cool";
+  x[i++] = "No";
+  x[i++] = "Cap";
+  // x[6] = 8;  // Will cause errors
+
+  print_str("\n");
+  print_str(x[4]);
+}
 
 export func Test main(x: i32) {
   let i32 y = 0;
@@ -25,5 +41,7 @@ export func Test main(x: i32) {
   let Test z = Test(5, "Nice!!!");
   z.print();
 
-  return z;
+  coolo();
+
+  return z; // should be 33
 }

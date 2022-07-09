@@ -50,7 +50,7 @@ export class DimeError {
 
   exit() {
     if (this.position.file && !["REPL","unknown", "UNKNOWN", "BUILTIN"].includes(this.position.file)) {
-      const column = this.position.column;
+      const column = this.position.column - 1;
       const line = this.position.line;
       const text = new TextDecoder("utf-8").decode(Deno.readFileSync(this.position.file));
       const lines = text.split("\n");
